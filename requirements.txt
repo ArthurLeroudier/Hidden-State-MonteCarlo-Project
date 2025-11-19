@@ -1,0 +1,7 @@
+jax
+joblib
+matplotlib
+numba
+numpy
+pandas
+particles

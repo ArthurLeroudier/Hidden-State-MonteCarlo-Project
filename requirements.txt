@@ -5,3 +5,4 @@ numba
 numpy
 pandas
 particles
+tqdm

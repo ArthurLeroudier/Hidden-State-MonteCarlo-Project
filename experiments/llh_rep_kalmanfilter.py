@@ -1,26 +1,24 @@
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
-import jax
 import numpy as np
 
 from data.load_data import load_wta
-from models.kalmanfilters import ExtendedKalmanFilter
+from models.kalmanfilters import ExtendedKalmanFilters
 
 def f(tau, sigma0):
     match_times, match_player_indices, _, players_id_to_name_dict, _ = load_wta()
-    wta_kalman = ExtendedKalmanFilter(match_times,
+    wta_kalman = ExtendedKalmanFilters(match_times,
                                     match_player_indices,
                                     players_id_to_name_dict=players_id_to_name_dict,
                                     tau=tau,
                                     sigma0 = sigma0,
                                     )
     
-    loglikelihood = wta_kalman.compute_llh()
+    loglikelihood = wta_kalman.compute_llh(modeltype="FixedVariance")
     return loglikelihood
 
 
-tau_axis = np.logspace(-3, -1, 3, base=10)
-sigma0_axis = np.logspace(-2, 0, 3, base=10)
+tau_axis = np.logspace(-3, -1, 30, base=10)
+sigma0_axis = np.logspace(-2, 0, 30, base=10)
 
 X, Y = np.meshgrid(tau_axis, sigma0_axis)
 

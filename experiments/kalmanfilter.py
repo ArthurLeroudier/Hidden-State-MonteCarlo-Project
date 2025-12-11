@@ -5,8 +5,8 @@ match_times, match_player_indices, match_results, players_id_to_name_dict, playe
 wta_kalman = ExtendedKalmanFilter(match_times,
                                   match_player_indices,
                                   players_id_to_name_dict=players_id_to_name_dict,
-                                  tau=1,
-                                  sigma0 = 1
+                                  tau=0.01,
+                                  sigma0 = 0.35,
                                   )
-likelihood = wta_kalman.compute_likelihood()
-print("likelihood of the WTA data under the Extended Kalman Filter model:", likelihood)
+loglikelihood = wta_kalman.compute_llh()
+print("loglikelihood of the WTA data under the Extended Kalman Filter model:", loglikelihood)

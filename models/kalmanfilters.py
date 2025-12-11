@@ -121,6 +121,9 @@ class ExtendedKalmanFilters():
         
             for match_index in range(nb_matches):
 
+                home_index = self.match_player_indices[match_index][0]
+                away_index = self.match_player_indices[match_index][1] 
+
                 g = gl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
                 h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
 

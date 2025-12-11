@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 from data.load_data import load_wta
 from models.kalmanfilters import ExtendedKalmanFilters
@@ -13,7 +14,7 @@ def f(tau, sigma0):
                                     sigma0 = sigma0,
                                     )
     
-    loglikelihood = wta_kalman.compute_llh(modeltype="FixedVariance")
+    loglikelihood = wta_kalman.compute_llh(modeltype="ScalarVariance")
     return loglikelihood
 
 
@@ -24,7 +25,7 @@ X, Y = np.meshgrid(tau_axis, sigma0_axis)
 
 Z = np.zeros_like(X)
 
-for i in range(X.shape[0]):
+for i in tqdm(range(X.shape[0])):
     for j in range(X.shape[1]):
         Z[i,j] = f(X[i,j], Y[i,j])
 

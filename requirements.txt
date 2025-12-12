@@ -3,6 +3,8 @@ joblib
 matplotlib
 numba
 numpy
+openpyxl
 pandas
 particles
+typing
 tqdm

@@ -45,3 +45,18 @@ def load_wta(start_date: str = '2018-12-31', end_date: str = '2023-01-01',
     match_player_indices = jnp.array(data_all[['WinnerID', 'LoserID']])
     match_results = jnp.ones_like(match_times)
     return match_times, match_player_indices, match_results, players_id_to_name_dict, players_name_to_id_dict
+
+
+def load_wta_sub(nb_players: int = 50):
+
+    match_times, match_player_indices, match_results, players_id_to_name_dict, players_name_to_id_dict = load_wta()
+
+    K = len(match_times)
+
+    sub_matches_indices = jnp.array([i for i in range(K) if match_player_indices[i, 0] < nb_players and match_player_indices[i, 1] < nb_players])
+    sub_match_times = match_times[sub_matches_indices]
+    sub_match_player_indices = match_player_indices[sub_matches_indices]
+    sub_match_results = match_results[sub_matches_indices]
+    sub_players_id_to_name_dict = {i: players_id_to_name_dict[i] for i in range(nb_players)}
+
+    return sub_match_times, sub_match_player_indices, sub_match_results, sub_players_id_to_name_dict, players_name_to_id_dict

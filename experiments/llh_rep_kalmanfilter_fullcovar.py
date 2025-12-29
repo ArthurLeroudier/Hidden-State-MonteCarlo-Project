@@ -3,10 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from data.load_data import load_wta
+from data.load_data import load_wta, load_wta_sub
 from models.kalmanfilters import ExtendedKalmanFilters
 
-match_times, match_player_indices, _, players_id_to_name_dict, _ = load_wta()
+nb_players = 80
+match_times, match_player_indices, _, players_id_to_name_dict, _ = load_wta_sub(nb_players=nb_players)
 
 def f(tau, sigma0):
 
@@ -15,15 +16,15 @@ def f(tau, sigma0):
                                        players_id_to_name_dict=players_id_to_name_dict,
                                        tau=tau,
                                        sigma0=sigma0)
-    return wta_kalman.compute_llh(modeltype="ScalarVariance")
+    return wta_kalman.compute_llh(modeltype="FullCovariance")
 
-tau_axis = np.logspace(-3, -1, 30)
-sigma0_axis = np.logspace(-2, 0, 30)
+tau_axis = np.logspace(-4, 0, 50)
+sigma0_axis = np.logspace(-4, 0, 50)
 
 X, Y = np.meshgrid(tau_axis, sigma0_axis)
 Z = np.zeros_like(X)
 
-save_path = "experiments/graphs/heatmap_data.npz"
+save_path = "experiments/graphs/data_fullcovar.npz"
 
 if os.path.exists(save_path):
     data = np.load(save_path)
@@ -42,7 +43,7 @@ for i in range(X.shape[0]):
             continue
 
         Z[i, j] = f(X[i, j], Y[i, j])
-        print("llh: ", Z[i, j], " for tau: ", X[i, j], " sigma0: ", Y[i, j])
+        #print("llh: ", Z[i, j], " for tau: ", X[i, j], " sigma0: ", Y[i, j])
         done_mask[i, j] = True
 
         if (i * X.shape[1] + j) % 20 == 0:
@@ -56,7 +57,7 @@ plt.xscale('log')
 plt.yscale('log')
 plt.xlabel(r"$\tau$ (log scale)")
 plt.ylabel(r"$\sigma_0$ (log scale)")
-plt.title("Log-likelihood of WTA data under Extended Kalman Filter model")
+plt.title("Log-likelihood of WTA data under Extended Kalman Filter model (Full Covariance)")
 plt.tight_layout()
-plt.savefig("experiments/graphs/wta_ekf_loglikelihood_heatmap.png")
+plt.savefig("experiments/graphs/wta_ekf_loglikelihood_fullcovar.png")
 

@@ -1,4 +1,3 @@
-from jax import numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 import numba
@@ -32,6 +31,8 @@ class Tennis_skill(ssms.StateSpaceModel):
     def PY(self, x, x_opp):
         return dists.Logistic(loc= x - x_opp)
 
+class Bootstrap
+
 
 class SMCFilter():
 
@@ -56,15 +57,15 @@ class SMCFilter():
         self.mu0 = 0
         self.s = s
     
-    def smoothing(tau, sigma0, N=1000):
-        fk = ssms.Bootstrap(ssm=Tennis_skill(tau=tau, sigma0= sigma0), data = )
+    def smoothing(tau, sigma0, data, N=1000):
+        fk = ssms.Bootstrap(ssm=Tennis_skill(tau=tau, sigma0= sigma0), data=data)
         filter = particles.SMC(fk=fk, N=N, qmc=False, store_history=True)
         filter.run()
         paths = filter.hist.backward_sampling_reject(N, max_trials==N*10**6)
         return (paths, filter.logLt)
 
-    def new_theta(tau, sigma0, N=1000):
-        paths, llh = self.smoothing(tau, sigma0, N=1000)
+    def new_theta(tau, sigma0, J=1000):
+        paths, llh = self.smoothing(tau, sigma0, N=J)
         new_tau = sum(x for x in )
         new_sigma0 = sum
         return (new_tau, new_sigma0, llh)

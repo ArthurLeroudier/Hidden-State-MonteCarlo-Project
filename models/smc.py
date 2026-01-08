@@ -31,7 +31,6 @@ class Tennis_skill(ssms.StateSpaceModel):
     def PY(self, x, x_opp):
         return dists.Logistic(loc= x - x_opp)
 
-class Bootstrap
 
 
 class SMCFilter():

@@ -11,7 +11,7 @@ wta_kalman = ExtendedKalmanFilters(match_times,
                                   sigma0 = 0.01,
                                   )
 a = time.time()
-loglikelihood = wta_kalman.compute_llh(modeltype="DiagonalVariance")
+loglikelihood = wta_kalman.compute_llh(modelType="DiagonalVariance")
 b = time.time()
 print("Computation time:", b - a, "seconds")
 print("loglikelihood of the WTA data under the Extended Kalman Filter model:", loglikelihood)

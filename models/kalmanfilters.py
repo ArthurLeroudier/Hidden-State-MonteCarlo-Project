@@ -152,26 +152,38 @@ class ExtendedKalmanFilters():
         if not self.updated:
             self.update(modelType=modelType)
 
-        v = jnp.diag(self.V)
-        mu = self.mu.copy()
+        v_filt = jnp.diag(self.V)
+        mu_filt = self.mu
 
-        mu_smooth = jnp.zeros((self.N, self.K), dtype=mu.dtype)
-        v_smooth = jnp.zeros((self.N, self.K), dtype=v.dtype)
+        dt = self.matches_info[1:, 2]
+        tau2 = self.tau ** 2
 
-        mu_smooth = mu_smooth.at[:, -1].set(mu)
-        v_smooth = v_smooth.at[:, -1].set(v)
+        mu_smooth = jnp.zeros((self.N, self.K), dtype=mu_filt.dtype)
+        v_smooth = jnp.zeros((self.N, self.K), dtype=v_filt.dtype)
+        mu_cross_smooth = jnp.zeros((self.N, self.K - 1), dtype=mu_filt.dtype)
 
-        for k in reversed(range(self.K - 1)):
-            dt = self.matches_info[k+1, 2]
-            eps = self.tau**2 * dt
+        mu_smooth = mu_smooth.at[:, -1].set(mu_filt)
+        v_smooth = v_smooth.at[:, -1].set(v_filt)
 
-            Dk = v / (v + eps)
+        def backward_step(carry, dt_k):
+            mu_next, v_next = carry
 
-            mu_smooth = mu_smooth.at[:, k].set(mu + Dk * (mu_smooth[:, k+1] - mu))
-            v_smooth = v_smooth.at[:, k].set(v + Dk**2 * (v_smooth[:, k+1] - v - eps))
+            eps = tau2 * dt_k
+            Dk = v_filt / (v_filt + eps)
 
-            mu = mu_smooth[:, k]
-            v = v_smooth[:, k]
+            mu_k = mu_filt + Dk * (mu_next - mu_filt)
+            v_k = v_filt + Dk**2 * (v_next - v_filt - eps)
+
+            mu_cross_k = mu_k * mu_next + Dk * v_next
+
+            return (mu_k, v_k), (mu_k, v_k, mu_cross_k)
+
+        (_, _), (mu_hist, v_hist, mu_cross_hist) = lax.scan(backward_step,(mu_filt, v_filt),dt[::-1])
+
+        mu_smooth = mu_smooth.at[:, :-1].set(mu_hist[::-1].T)
+        v_smooth = v_smooth.at[:, :-1].set(v_hist[::-1].T)
+        mu_cross_smooth = mu_cross_hist[::-1].T
 
         self.mu_smooth = mu_smooth
         self.v_smooth = v_smooth
+        self.mu_cross_smooth = mu_cross_smooth

@@ -9,7 +9,7 @@ match_times, match_player_indices, _, players_id_to_name_dict, _ = load_wta()
 
 tau_init = 0.01
 sigma0_init = 0.1
-n_iter = 800
+n_iter = 1000
 
 wta_kalman = ExtendedKalmanFilters(
     match_times,

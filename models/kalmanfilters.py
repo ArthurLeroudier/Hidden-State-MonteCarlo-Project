@@ -30,8 +30,8 @@ class ExtendedKalmanFilters():
 
         self.K = len(match_player_indices)
         self.N = len(players_id_to_name_dict)
-        self.match_times = match_times
-        self.match_player_indices = match_player_indices
+        self.match_times = jnp.array(match_times)
+        self.match_player_indices = jnp.array(match_player_indices)
         self.rankings = jnp.zeros(self.K)
 
         time_deltas = jnp.diff(self.match_times, prepend=self.match_times[0])
@@ -46,30 +46,33 @@ class ExtendedKalmanFilters():
         self.mu = random.normal(key, shape=(self.N,)) * sigma0
         self.V = jnp.eye(self.N)*sigma0
 
+        self.log_likelihood = None
+
         self.updated = False
 
-    def update(self, modelType = "FullVariance"):
+    def filtering(self, modelType = "FullVariance"):
 
         if modelType == "FullCovariance":
 
             mu0 = self.mu
-            V0  = self.V
+            V0 = self.V
+            loglikelihood0 = 0.0
 
             def step(carry, info):
-                mu, V = carry
+                mu, V, loglikelihood = carry
                 home, away, eps = info
 
                 V_aux = self.beta**2 * V + eps * jnp.eye(self.N)
 
-                omega = (
-                    V_aux[home, home]
-                    + V_aux[away, away]
-                    - 2 * V_aux[home, away]
-                )
+                omega = V_aux[home, home] + V_aux[away, away] - 2 * V_aux[home, away]
 
                 skill_diff = mu[home] - mu[away]
-                g = gl(self.beta * skill_diff / self.s, s=self.s)
-                h = hl(self.beta * skill_diff / self.s, s=self.s)
+                diff = self.beta * skill_diff / self.s
+
+                loglikelihood = loglikelihood + l(skill_diff, s=self.s)
+
+                g = gl(diff, s=self.s)
+                h = hl(diff, s=self.s)
 
                 denom = self.s**2 + h * omega
                 coeff = (g * self.s) / denom
@@ -80,25 +83,25 @@ class ExtendedKalmanFilters():
                 mu = self.beta * mu + coeff * delta
                 V = V_aux - coeff2 * jnp.outer(delta, delta)
 
-                return (mu, V), None
+                return (mu, V, loglikelihood), None
 
-            @jax.jit
-            def run_scan(mu0, V0, matches_info):
-                return jax.lax.scan(step, (mu0, V0), matches_info)
+            (mu_final, V_final, loglikelihood_final), _ = jax.lax.scan(
+                step, (mu0, V0, loglikelihood0), self.matches_info
+            )
 
-            (self.mu, self.V), _ = run_scan(mu0, V0, self.matches_info)
-
+            self.mu = mu_final
+            self.V = V_final
+            self.log_likelihood = loglikelihood_final
             self.updated = True
 
-
-        elif modelType == "DiagonalVariance":
-
+        if modelType == "DiagonalVariance":
 
             mu0 = self.mu
             v0 = jnp.full(self.N, self.sigma0**2)
 
+
             def step(carry, inp):
-                mu, v = carry
+                mu, v, loglikelihood = carry
                 home, away, dt = inp
 
                 eps = (self.tau ** 2) * dt
@@ -108,7 +111,11 @@ class ExtendedKalmanFilters():
                 Va = V_aux[away]
                 omega = Vh + Va
 
-                diff = self.beta * (mu[home] - mu[away]) / self.s
+                skill_diff = mu[home] - mu[away]
+                diff = self.beta * skill_diff / self.s
+
+                loglikelihood = loglikelihood + l(skill_diff, s=self.s)
+
                 g = gl(diff, s=self.s)
                 h = hl(diff, s=self.s)
 
@@ -123,34 +130,21 @@ class ExtendedKalmanFilters():
                 v = v.at[home].set(Vh * (1 - coeff2 * Vh))
                 v = v.at[away].set(Va * (1 - coeff2 * Va))
 
-                return (mu, v), None
+                return (mu, v, loglikelihood), None
 
-            @jax.jit
-            def run_scan(mu0, v0, matches_info):
-                return jax.lax.scan(step, (mu0, v0), matches_info)
+            (mu_final, v_final, loglikelihood_final), _ = jax.lax.scan(
+                step, (mu0, v0, 0.0), self.matches_info
+            )
 
-            (self.mu, v), _ = run_scan(mu0, v0, self.matches_info)
-            self.V = jnp.diag(v)
-
+            self.mu = mu_final
+            self.V = jnp.diag(v_final)
+            self.log_likelihood = loglikelihood_final
             self.updated = True
 
-    def compute_llh(self, modelType = "DiagonalVariance"):
-
-        if not self.updated:
-            self.update(modelType=modelType)
-
-        log_likelihood = 0
-        for match_index in range(self.K):
-            home_index = self.match_player_indices[match_index][0]
-            away_index = self.match_player_indices[match_index][1] 
-            skill_diff = self.mu[home_index] - self.mu[away_index]
-            log_likelihood += l(skill_diff, s=self.s)
-
-        return log_likelihood
     
     def smoothing(self, modelType="DiagonalVariance"):
         if not self.updated:
-            self.update(modelType=modelType)
+            self.filtering(modelType=modelType)
 
         v_filt = jnp.diag(self.V)
         mu_filt = self.mu

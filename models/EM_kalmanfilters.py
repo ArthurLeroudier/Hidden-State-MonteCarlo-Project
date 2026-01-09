@@ -29,7 +29,7 @@ def EM_KalmanFilter(
         filter_obj.sigma0 = sigma0
         filter_obj.tau = tau
         filter_obj.updated = False
-        filter_obj.update(modelType=modelType)
+        filter_obj.filtering(modelType=modelType)
         filter_obj.smoothing(modelType=modelType)
 
         mu_s = filter_obj.mu_smooth

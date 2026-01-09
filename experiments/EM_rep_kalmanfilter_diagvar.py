@@ -7,7 +7,7 @@ import os
 
 match_times, match_player_indices, _, players_id_to_name_dict, _ = load_wta()
 
-tau_init = 0.01
+tau_init = 0.02
 sigma0_init = 0.1
 n_iter = 1000
 
@@ -27,7 +27,7 @@ os.makedirs(save_dir, exist_ok=True)
 np.save(os.path.join(save_dir, "tau_traj.npy"), tau_traj)
 np.save(os.path.join(save_dir, "sigma0_traj.npy"), sigma0_traj)
 
-tau_axis = np.logspace(-3, -1, 30)
+tau_axis = np.logspace(-3, 0, 30)
 sigma0_axis = np.logspace(-2, 0, 30)
 
 plt.figure(figsize=(8, 6))

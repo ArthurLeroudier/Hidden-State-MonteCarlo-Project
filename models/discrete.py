@@ -14,6 +14,7 @@ match_times, match_player_indices, match_results, players_id_to_name_dict, playe
 n_players = len(players_id_to_name_dict)
 
 S = 500
+grad_step_size = 1e-3  
 
 Psi1 = [[1/np.sqrt(S) for i in range(1,S+1)]]
 Psi2 = [[np.sqrt(2/S)*np.cos(np.pi-(i-1)*(2*j-1)) for j in range(1,S+1)] for i in range(2, S+1)]
@@ -41,7 +42,7 @@ class Filter():
         self.S = S
         self.s = s
 
-        self.x = [[0.] for pid in n_players] #discrete gaussian centered in S/2, n_players
+        self.x = [[] for pid in range[n_players]] #empty list
 
         self.t = [[0.] for i in range(n_players)]
 
@@ -84,13 +85,13 @@ class Filter():
     def run(self, match_times_arr, match_player_indices_arr):
         means_hist = np.empty((len(match_times_arr), n_players), dtype=float)
 
-        #Initialization of the filtering
+        #Initialization of the filtering for t=0
         x0 = np.zeros(S)
         x0[S//2] += 1/2
         x0[(S+1)//2] += 1/2
         x0 = times_M(x0, self.sigma0, 1)
         for pid in range(n_players):
-            self.x[pid][0] = x0
+            self.x[pid].append(x0)
 
         for k in range(len(match_times_arr)):
             t = float(match_times_arr[k])
@@ -134,7 +135,7 @@ def new_theta(tau, sigma0):
     filter.run(match_times_arr, match_player_indices_arr)
     filter.smoothing()
     new_sigma0 = 1/n_players*(sum(filter.smoothed[pid][0] for pid in range(n_players))^2) #empirical initial variance
-    Q1 = 
+    Q1 = #how to calculate variance
 
     N = [[] for pid in range(n_players)]
     D = [[] for pid in range(n_players)]
@@ -158,6 +159,9 @@ def new_theta(tau, sigma0):
             D[pid].append(D_ik)
 
     dQ2 = sum([sum(N[pid]/D[pid]) for pid in range(n_players)])
+    new_tau = np.exp(log(tau) + grad_step_size*tau*dQ2)
+
+    return (new_sigma0, new_tau)
 
 def EM(tau, sigma0, steps=1000):
     all_tau = [tau]

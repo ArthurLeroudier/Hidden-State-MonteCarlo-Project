@@ -48,9 +48,9 @@ class ExtendedKalmanFilters():
 
         self.updated = False
 
-    def update(self, modeltype = "FullVariance"):
+    def update(self, modelType = "FullVariance"):
 
-        if modeltype == "FullCovariance":
+        if modelType == "FullCovariance":
 
             mu0 = self.mu
             V0  = self.V
@@ -91,7 +91,7 @@ class ExtendedKalmanFilters():
             self.updated = True
 
 
-        elif modeltype == "DiagonalVariance":
+        elif modelType == "DiagonalVariance":
 
 
             mu0 = self.mu
@@ -134,11 +134,10 @@ class ExtendedKalmanFilters():
 
             self.updated = True
 
-
-    def compute_llh(self, modeltype = "DiagonalVariance"):
+    def compute_llh(self, modelType = "DiagonalVariance"):
 
         if not self.updated:
-            self.update(modeltype=modeltype)
+            self.update(modelType=modelType)
 
         log_likelihood = 0
         for match_index in range(self.K):
@@ -148,3 +147,31 @@ class ExtendedKalmanFilters():
             log_likelihood += l(skill_diff, s=self.s)
 
         return log_likelihood
+    
+    def smoothing(self, modelType="DiagonalVariance"):
+        if not self.updated:
+            self.update(modelType=modelType)
+
+        v = jnp.diag(self.V)
+        mu = self.mu.copy()
+
+        mu_smooth = jnp.zeros((self.N, self.K), dtype=mu.dtype)
+        v_smooth = jnp.zeros((self.N, self.K), dtype=v.dtype)
+
+        mu_smooth = mu_smooth.at[:, -1].set(mu)
+        v_smooth = v_smooth.at[:, -1].set(v)
+
+        for k in reversed(range(self.K - 1)):
+            dt = self.matches_info[k+1, 2]
+            eps = self.tau**2 * dt
+
+            Dk = v / (v + eps)
+
+            mu_smooth = mu_smooth.at[:, k].set(mu + Dk * (mu_smooth[:, k+1] - mu))
+            v_smooth = v_smooth.at[:, k].set(v + Dk**2 * (v_smooth[:, k+1] - v - eps))
+
+            mu = mu_smooth[:, k]
+            v = v_smooth[:, k]
+
+        self.mu_smooth = mu_smooth
+        self.v_smooth = v_smooth

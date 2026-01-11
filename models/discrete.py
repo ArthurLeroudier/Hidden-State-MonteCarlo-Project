@@ -162,7 +162,7 @@ def new_theta(tau, sigma0, match_times, match_player_indices, players_id_to_name
         for x in range(filter.S):
             mean_x += x*filter.smoothed[pid][0][x]
         mean_x = mean_x/filter.S
-        new_sigma0 += mean_x**2
+        new_sigma0 += (mean_x-filter.S/2)**2
     new_sigma0 = new_sigma0/filter.n_players #empirical initial variance
     print('new sigma0')
     print(new_sigma0)

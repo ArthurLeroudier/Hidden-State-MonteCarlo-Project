@@ -1,6 +1,8 @@
 from tqdm import tqdm
+import jax
 import jax.random as random
 import jax.numpy as jnp
+from jax import lax
 
 key = random.PRNGKey(0)
 
@@ -11,7 +13,8 @@ def gl(skill_diff, s=1):
     return 1/(s*(+jnp.exp((skill_diff)/s)))
 
 def hl(skill_diff, s=1):
-    return jnp.exp((skill_diff)/s)*(gl(skill_diff, s=s))**2
+    aux = gl(skill_diff, s=s)
+    return jnp.exp((skill_diff)/s)*aux*aux
 
 class ExtendedKalmanFilters():
 
@@ -27,9 +30,12 @@ class ExtendedKalmanFilters():
 
         self.K = len(match_player_indices)
         self.N = len(players_id_to_name_dict)
-        self.match_times = match_times
-        self.match_player_indices = match_player_indices
+        self.match_times = jnp.array(match_times)
+        self.match_player_indices = jnp.array(match_player_indices)
         self.rankings = jnp.zeros(self.K)
+
+        time_deltas = jnp.diff(self.match_times, prepend=self.match_times[0])
+        self.matches_info = jnp.column_stack([self.match_player_indices, time_deltas])
 
         self.beta = beta
         self.s = s
@@ -40,109 +46,101 @@ class ExtendedKalmanFilters():
         self.mu = random.normal(key, shape=(self.N,)) * sigma0
         self.V = jnp.eye(self.N)*sigma0
 
+        self.log_likelihood = None
+
         self.updated = False
 
-    def update(self, nb_matches=1, modeltype = "FullVariance"):
+    def filtering(self, modelType = "FullVariance"):
 
-        if modeltype == "FullCovariance":
-            for match_index in range(nb_matches):
+        if modelType == "FullCovariance":
 
-                eps = self.tau**2*(self.match_times[match_index] - self.match_times[match_index-1]) if match_index > 0 else 0
+            mu0 = self.mu
+            V0 = self.V
+            loglikelihood0 = 0.0
 
-                home_index = self.match_player_indices[match_index][0]
-                away_index = self.match_player_indices[match_index][1] 
+            def step(carry, info):
+                mu, V, loglikelihood = carry
+                home, away, eps = info
 
-                V_aux = self.beta**2*self.V + eps*jnp.eye(self.N)
-                
-                omega = V_aux[home_index, home_index] + V_aux[away_index, away_index] - 2*V_aux[home_index, away_index]
-                g = gl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-                h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
+                V_aux = self.beta**2 * V + eps * jnp.eye(self.N)
 
-                delta = V_aux[:, home_index] - V_aux[:, away_index]
+                omega = V_aux[home, home] + V_aux[away, away] - 2 * V_aux[home, away]
 
-                self.mu = self.beta * self.mu + (g * self.s) / (self.s**2 + h*omega) * delta
-                h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
+                skill_diff = mu[home] - mu[away]
+                diff = self.beta * skill_diff / self.s
 
-                self.V = V_aux - (h / (self.s**2 + h*omega)) * jnp.outer(delta, delta) * (h / (self.s**2 + h*omega))
+                loglikelihood = loglikelihood + l(skill_diff, s=self.s)
 
+                g = gl(diff, s=self.s)
+                h = hl(diff, s=self.s)
+
+                denom = self.s**2 + h * omega
+                coeff = (g * self.s) / denom
+                coeff2 = h / denom
+
+                delta = V_aux[:, home] - V_aux[:, away]
+
+                mu = self.beta * mu + coeff * delta
+                V = V_aux - coeff2 * jnp.outer(delta, delta)
+
+                return (mu, V, loglikelihood), (mu, jnp.diag(V))
+
+            (mu_final, V_final, loglikelihood_final), (mu_hist, v_hist) = jax.lax.scan(
+                step, (mu0, V0, loglikelihood0), self.matches_info
+            )
+
+            self.mu = mu_final
+            self.V = V_final
+            self.log_likelihood = loglikelihood_final
+            self.mu_hist = mu_hist.T
+            self.v_hist = v_hist.T
             self.updated = True
 
-        elif modeltype == "DiagonalVariance":
 
-            v = jnp.full(self.N, self.sigma0**2)
+        if modelType == "DiagonalVariance":
 
-            for match_index in range(nb_matches):
+            mu0 = self.mu
+            v0 = jnp.full(self.N, self.sigma0**2)
 
-                eps = self.tau**2*(self.match_times[match_index] - self.match_times[match_index-1]) if match_index > 0 else 0
+            def step(carry, inp):
+                mu, v, loglikelihood = carry
+                home, away, dt = inp
 
-                home_index = self.match_player_indices[match_index][0]
-                away_index = self.match_player_indices[match_index][1] 
+                eps = (self.tau ** 2) * dt
+                V_aux = (self.beta**2) * v + eps
 
-                V_aux = self.beta**2*v + eps
-                omega = V_aux[home_index] + V_aux[away_index]
+                Vh = V_aux[home]
+                Va = V_aux[away]
+                omega = Vh + Va
 
-                g = gl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-                h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
+                skill_diff = mu[home] - mu[away]
+                diff = self.beta * skill_diff / self.s
 
-                delta = jnp.zeros(self.N).at[home_index].set(V_aux[home_index]).at[away_index].set(-V_aux[away_index])
-                self.mu = self.beta * self.mu + (g * self.s) / (self.s**2 + h * omega) * delta
+                loglikelihood = loglikelihood + l(skill_diff, s=self.s)
 
-                delta = delta.at[away_index].set(delta[away_index]*(-1))
-                delta = 1 - h/(self.s**2 + h*omega) * delta
-                v = v * delta
+                g = gl(diff, s=self.s)
+                h = hl(diff, s=self.s)
 
-            self.V = jnp.diag(v)
+                denom = self.s**2 + h * omega
+                coeff = (g * self.s) / denom
+                coeff2 = h / denom
+
+                mu = mu * self.beta
+                mu = mu.at[home].add(coeff * Vh)
+                mu = mu.at[away].add(-coeff * Va)
+
+                v = v.at[home].set(Vh * (1 - coeff2 * Vh))
+                v = v.at[away].set(Va * (1 - coeff2 * Va))
+
+                return (mu, v, loglikelihood), (mu, v)
+
+            (mu_final, v_final, loglikelihood_final), (mu_hist, v_hist) = jax.lax.scan(step, (mu0, v0, 0.0), self.matches_info)
+
+            self.mu = mu_final
+            self.V = jnp.diag(v_final)
+            self.log_likelihood = loglikelihood_final
+            self.mu_hist = mu_hist.T
+            self.v_hist = v_hist.T
             self.updated = True
 
-        elif modeltype == "ScalarVariance":
-            
-            v = self.sigma0**2
-
-            for match_index in range(nb_matches):
-                eps = self.tau**2*(self.match_times[match_index] - self.match_times[match_index-1]) if match_index > 0 else 0
-
-                home_index = self.match_player_indices[match_index][0]
-                away_index = self.match_player_indices[match_index][1] 
-
-                v_aux = self.beta**2 * v + eps
-
-                g = gl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-                h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-
-                delta = delta = jnp.zeros(self.N).at[home_index].set(v_aux).at[away_index].set(-v_aux)
-                self.mu = self.beta * self.mu + (g * self.s) / (self.s**2 + h * (2*v_aux)) * delta
-
-                v = v_aux * (1 - (2*h*v_aux)/(self.N*(self.s**2 + h * (2*v_aux))))
-
-            self.V = jnp.eye(self.N) * v
-            self.updated = True
-
-        elif modeltype == "FixedVariance":
-        
-            for match_index in range(nb_matches):
-
-                home_index = self.match_player_indices[match_index][0]
-                away_index = self.match_player_indices[match_index][1] 
-
-                g = gl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-                h = hl(self.beta*(self.mu[home_index] - self.mu[away_index])/self.s, s=self.s)
-
-                delta = jnp.zeros(self.N).at[home_index].set(self.sigma0).at[away_index].set(-self.sigma0)
-                self.mu = self.beta * self.mu + (g * self.s) / (self.s**2 + 2*h*self.sigma0**2) * delta
-
-            self.V = jnp.eye(self.N) * self.sigma0**2
-            self.updated = True
-
-    def compute_llh(self, modeltype = "DiagonalVariance"):
-
-        if not self.updated:
-            self.update(nb_matches=self.K, modeltype=modeltype)
-
-        log_likelihood = 0
-        for match_index in range(self.K):
-            home_index = self.match_player_indices[match_index][0]
-            away_index = self.match_player_indices[match_index][1] 
-            skill_diff = self.mu[home_index] - self.mu[away_index]
-            log_likelihood += l(skill_diff, s=self.s)
-
-        return log_likelihood
+    

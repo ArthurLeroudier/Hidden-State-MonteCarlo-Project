@@ -125,7 +125,7 @@ class Filter():
     def smoothing(self):
         for pid in range(n_players):
             K = len(self.x[pid])
-            self.smoothed = #INITIALISATION
+            self.smoothed = [self.x[pid][-1].copy()] #INITIALISATION
             for k in range(K-1,-1,-1):
                 self.smooth_step(pid,k)
     
@@ -135,7 +135,7 @@ def new_theta(tau, sigma0):
     filter.run(match_times_arr, match_player_indices_arr)
     filter.smoothing()
     new_sigma0 = 1/n_players*(sum(filter.smoothed[pid][0] for pid in range(n_players))^2) #empirical initial variance
-    Q1 = #how to calculate variance
+    Q1 = 1#how to calculate variance
 
     N = [[] for pid in range(n_players)]
     D = [[] for pid in range(n_players)]

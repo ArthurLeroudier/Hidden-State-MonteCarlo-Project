@@ -83,22 +83,24 @@ class ExtendedKalmanFilters():
                 mu = self.beta * mu + coeff * delta
                 V = V_aux - coeff2 * jnp.outer(delta, delta)
 
-                return (mu, V, loglikelihood), None
+                return (mu, V, loglikelihood), (mu, jnp.diag(V))
 
-            (mu_final, V_final, loglikelihood_final), _ = jax.lax.scan(
+            (mu_final, V_final, loglikelihood_final), (mu_hist, v_hist) = jax.lax.scan(
                 step, (mu0, V0, loglikelihood0), self.matches_info
             )
 
             self.mu = mu_final
             self.V = V_final
             self.log_likelihood = loglikelihood_final
+            self.mu_hist = mu_hist.T
+            self.v_hist = v_hist.T
             self.updated = True
+
 
         if modelType == "DiagonalVariance":
 
             mu0 = self.mu
             v0 = jnp.full(self.N, self.sigma0**2)
-
 
             def step(carry, inp):
                 mu, v, loglikelihood = carry
@@ -130,54 +132,15 @@ class ExtendedKalmanFilters():
                 v = v.at[home].set(Vh * (1 - coeff2 * Vh))
                 v = v.at[away].set(Va * (1 - coeff2 * Va))
 
-                return (mu, v, loglikelihood), None
+                return (mu, v, loglikelihood), (mu, v)
 
-            (mu_final, v_final, loglikelihood_final), _ = jax.lax.scan(
-                step, (mu0, v0, 0.0), self.matches_info
-            )
+            (mu_final, v_final, loglikelihood_final), (mu_hist, v_hist) = jax.lax.scan(step, (mu0, v0, 0.0), self.matches_info)
 
             self.mu = mu_final
             self.V = jnp.diag(v_final)
             self.log_likelihood = loglikelihood_final
+            self.mu_hist = mu_hist.T
+            self.v_hist = v_hist.T
             self.updated = True
 
     
-    def smoothing(self, modelType="DiagonalVariance"):
-        if not self.updated:
-            self.filtering(modelType=modelType)
-
-        v_filt = jnp.diag(self.V)
-        mu_filt = self.mu
-
-        dt = self.matches_info[1:, 2]
-        tau2 = self.tau ** 2
-
-        mu_smooth = jnp.zeros((self.N, self.K), dtype=mu_filt.dtype)
-        v_smooth = jnp.zeros((self.N, self.K), dtype=v_filt.dtype)
-        mu_cross_smooth = jnp.zeros((self.N, self.K - 1), dtype=mu_filt.dtype)
-
-        mu_smooth = mu_smooth.at[:, -1].set(mu_filt)
-        v_smooth = v_smooth.at[:, -1].set(v_filt)
-
-        def backward_step(carry, dt_k):
-            mu_next, v_next = carry
-
-            eps = tau2 * dt_k
-            Dk = v_filt / (v_filt + eps)
-
-            mu_k = mu_filt + Dk * (mu_next - mu_filt)
-            v_k = v_filt + Dk**2 * (v_next - v_filt - eps)
-
-            mu_cross_k = mu_k * mu_next + Dk * v_next
-
-            return (mu_k, v_k), (mu_k, v_k, mu_cross_k)
-
-        (_, _), (mu_hist, v_hist, mu_cross_hist) = lax.scan(backward_step,(mu_filt, v_filt),dt[::-1])
-
-        mu_smooth = mu_smooth.at[:, :-1].set(mu_hist[::-1].T)
-        v_smooth = v_smooth.at[:, :-1].set(v_hist[::-1].T)
-        mu_cross_smooth = mu_cross_hist[::-1].T
-
-        self.mu_smooth = mu_smooth
-        self.v_smooth = v_smooth
-        self.mu_cross_smooth = mu_cross_smooth

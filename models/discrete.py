@@ -1,10 +1,9 @@
-import numpy as np
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from data.load_data_numpy import load_wta_numpy
+from data.load_data import load_wta
 
-match_times, match_player_indices, match_results, players_id_to_name_dict, players_name_to_id_dict = load_wta_numpy()
-n_players = len(players_id_to_name_dict)
+match_times, match_player_indices, match_results, players_id_to_name_dict, players_name_to_id_dict = load_wta()
 
 grad_step_size = 1e-3 
 min_prob: float = 1e-10
@@ -13,33 +12,38 @@ class Filter():
     def __init__(self,
                  tau, 
                  sigma0,
+                 players_id_to_name_dict,
                  S = 500,
                  s=1):
         self.tau = tau
         self.sigma0 = sigma0
         self.S = S
         self.s = s
+        
+        self.n_players = len(players_id_to_name_dict)
 
-        self.x = [[] for pid in range(n_players)] #empty list
+        self.x = [[] for pid in range(self.n_players)] #empty list
 
-        self.t = [[0.] for i in range(n_players)]
+        self.t = [[0.] for i in range(self.n_players)]
 
-        self.smoothed = [[] for pid in range(n_players)]
+        self.smoothed = [[] for pid in range(self.n_players)]
 
-        skills_index = np.reshape(np.linspace(0, S - 1, S), (S, 1))
-        omegas = np.pi * skills_index / (2 * S)
-        self.Lambda = np.cos(2 * omegas)
-        self.Lambda = np.diag(self.Lambda[:,0]) - np.eye(S)
-        self.Psi_inv = np.sqrt(2 / S) * np.cos(np.transpose(omegas) * (2 * (skills_index + 1) - 1))
-        self.Psi_inv[:,0] = self.Psi_inv[:, 0] * np.sqrt(1 / 2)
-        self.Psi = np.transpose(self.Psi_inv)
+        skills_index = jnp.reshape(jnp.linspace(0, S - 1, S), (S, 1))
+        omegas = jnp.pi * skills_index / (2 * S)
+        self.Lambda = jnp.cos(2 * omegas)
+        self.Lambda = jnp.diag(self.Lambda[:,0]) - jnp.eye(S)
+        self.Psi_inv = jnp.sqrt(2 / S) * jnp.cos(jnp.transpose(omegas) * (2 * (skills_index + 1) - 1))
+        self.Psi = self.Psi_inv.at[:,0].set(self.Psi_inv[:, 0] * jnp.sqrt(1 / 2))
+        self.Psi = jnp.transpose(self.Psi_inv)
+
+        self.Gk = jnp.array([[jnp.exp(self.logG(i, j)) for i in range(self.S)] for j in range(self.S)])
 
 
     def times_M(self, pi, dt, tau):
-        pi1 = np.dot(pi,self.Psi_inv)
-        e = np.exp(-tau*dt*self.Lambda)
-        pi2 = np.dot(pi1, e)
-        pi3 = np.dot(pi2, self.Psi)
+        pi1 = jnp.dot(pi,self.Psi_inv)
+        e = jnp.exp(-tau*dt*self.Lambda)
+        pi2 = jnp.dot(pi1, e)
+        pi3 = jnp.dot(pi2, self.Psi)
         return(pi3)
     
 
@@ -58,35 +62,35 @@ class Filter():
         log G(x_w, x_l) = log sigmoid((x_w - x_l) / s)
         """
         z = (xw - xl) / self.s
-        return -np.logaddexp(0.0, -z)
+        return -jnp.logaddexp(0.0, -z)
 
     def update_match(self, t, winner_id, loser_id):
         predict_winner = self.propagate(winner_id, t)
         predict_loser = self.propagate(loser_id, t)
         
-        f = np.dot(np.transpose(predict_winner), predict_loser)
-        Gk = np.array([[np.exp(self.logG(i, j)) for i in range(self.S)] for j in range(self.S)])
+        f = jnp.dot(jnp.transpose(predict_winner), predict_loser)
+        
 
-        f = np.multiply(f, Gk)  
-        f = f/np.sum(f) #Normalize joint filter to get distribution
+        f = jnp.multiply(f, self.Gk)  
+        f = f/jnp.sum(f) #Normalize joint filter to get distribution
 
-        self.x[winner_id].append(np.transpose(np.dot(f,np.ones(self.S))))
-        self.x[loser_id].append(np.dot(np.ones(self.S), f))
+        self.x[winner_id].append(jnp.transpose(jnp.dot(f,jnp.ones(self.S))))
+        self.x[loser_id].append(jnp.dot(jnp.ones(self.S), f))
 
         
 
     # Loop
     def run(self, match_times, match_player_indices):
-        means_hist = np.empty((len(match_times), n_players), dtype=float)
+        print('filtering')
 
         #Initialization of the filtering for t=0
-        x0 = np.zeros(self.S)
-        x0[self.S//2] += 1/2
-        x0[(self.S+1)//2] += 1/2
+        x0 = jnp.zeros(self.S)
+        x0 = x0.at[self.S//2].set(x0[self.S//2] + 1/2)
+        x0 = x0.at[(self.S+1)//2].set(x0[(self.S+1)//2] + 1/2)
         x0 = self.times_M(x0, dt=self.sigma0, tau=1)
-        x0[x0 < min_prob] = min_prob
-        x0 = x0/np.sum(x0)
-        for pid in range(n_players):
+        x0 = x0.at[x0 < min_prob].set(min_prob)
+        x0 = x0/jnp.sum(x0)
+        for pid in range(self.n_players):
             self.x[pid].append(x0)
 
         for k in range(len(match_times)):
@@ -98,7 +102,7 @@ class Filter():
 
     
     def posterior_mean(self):
-        return np.mean(self.x)
+        return jnp.mean(self.x)
 
     def smooth_step(self, pid, k):
         dt = self.t[pid][k] - self.t[pid][k-1]
@@ -107,21 +111,22 @@ class Filter():
 
         predict = self.times_M(filter_k, dt, self.tau)
         
-        smooth = np.divide(smooth,predict)
+        smooth = jnp.divide(smooth,predict)
         smooth = self.times_M(smooth, dt, self.tau)
-        smooth = np.multiply(filter_k, smooth)
+        smooth = jnp.multiply(filter_k, smooth)
 
         #get a proper distribution
-        smooth[smooth < min_prob] = min_prob
-        smooth = smooth/np.sum(smooth)
+        smooth = smooth.at[smooth < min_prob].set(min_prob)
+        smooth = smooth/jnp.sum(smooth)
 
         self.smoothed[pid].append(smooth)
 
-    def smoothing(self, match_times, match_players_indices):
-        for pid in range(n_players):
+    def smoothing(self, match_times, match_player_indices):
+        print('smoothing')
+
+        for pid in range(self.n_players):
             K = len(self.x[pid])
             self.smoothed[pid].append(self.x[pid][-1])
-
             for k in range(K-1,-1,-1):
                 self.smooth_step(pid,k)
 
@@ -139,58 +144,62 @@ class Filter():
             xl = sum([i*self.x[l_id][k_l][i] for i in range(self.S)])/self.S 
 
             llh += self.logG(xw, xl)
+        print(llh)
         return llh
 
     
     
-def new_theta(tau, sigma0, match_times, match_player_indices):
-    filter = Filter(tau= tau, sigma0 = sigma0)
+def new_theta(tau, sigma0, match_times, match_player_indices, players_id_to_name_dict):
+
+    filter = Filter(tau= tau, sigma0 = sigma0, players_id_to_name_dict=players_id_to_name_dict)
     filter.run(match_times, match_player_indices)
-    llh = filter.smoothing(match_times=match_times, match_players_indices=match_player_indices)
+    llh = filter.smoothing(match_times=match_times, match_player_indices=match_player_indices)
+    print('filtered and smoothed')
     
     new_sigma0 = 0
-    for pid in range(n_players):
+    for pid in range(filter.n_players):
         mean_x = 0
         for x in range(filter.S):
             mean_x += x*filter.smoothed[pid][0][x]
         mean_x = mean_x/filter.S
         new_sigma0 += mean_x**2
-    new_sigma0 = new_sigma0/n_players #empirical initial variance
+    new_sigma0 = new_sigma0/filter.n_players #empirical initial variance
+    print('new sigma0')
+    print(new_sigma0)
 
-    N = [[] for pid in range(n_players)]
-    D = [[] for pid in range(n_players)]
-
-    for pid in range(n_players): #compute necessary quantities for gradient G2 computation
+    dQ2 = 0
+    for pid in range(filter.n_players): #compute necessary quantities for gradient G2 computation
         K = len(filter.x[pid])
         for k in range(1, K):
-            F_ik = np.dot(filter.x[pid][k-1], filter.Psi_inv)
-            S_ik = np.dot(filter.smoothed[pid][k], filter.Psi_inv)
+            F_ik = jnp.dot(filter.x[pid][k-1], filter.Psi_inv)
+            S_ik = jnp.dot(filter.smoothed[pid][k], filter.Psi_inv)
 
             dt = filter.t[pid][k] - filter.t[pid][k-1]
-            e = np.exp(filter.tau * dt * filter.Lambda )
-            Lambda_k = dt*np.dot(filter.Lambda ,e)
+            e = jnp.exp(-filter.tau * dt * filter.Lambda )
+            Lambda_k = dt*jnp.dot(filter.Lambda ,e)
 
-            N_ik = np.dot(F_ik, Lambda_k)
-            N_ik = np.dot(N_ik, np.transpose(S_ik))
-            D_ik = np.dot(F_ik, filter.Lambda)
-            D_ik = np.dot(D_ik, np.transpose(S_ik))
+            N_ik = jnp.dot(F_ik, Lambda_k)
+            N_ik = jnp.dot(N_ik, jnp.transpose(S_ik))
+            D_ik = jnp.dot(F_ik, filter.Lambda)
+            D_ik = jnp.dot(D_ik, jnp.transpose(S_ik))
 
-            N[pid].append(N_ik)
-            D[pid].append(D_ik)
+            dQ2 += N_ik/D_ik
 
-    dQ2 = sum([np.sum(np.divide(N[pid],D[pid])) for pid in range(n_players)])
-    new_tau = np.exp(np.log(tau) + grad_step_size*tau*dQ2)
+    new_tau = tau + grad_step_size*tau*dQ2
+    print('new tau')
+    print(new_tau)
 
     return (new_sigma0, new_tau, llh)
 
-def EM(tau, sigma0, match_times, match_player_indices, steps=1000):
+def EM(tau, sigma0, match_times, match_player_indices, players_id_to_name_dict= players_id_to_name_dict, steps=1000):
     all_tau = [tau]
     all_sigma0 = [sigma0]
     all_llh = []
     last_tau = tau
     last_sigma0 = sigma0
     for i in range(steps):
-        last_tau, last_sigma0, llh = new_theta(last_tau, last_sigma0, match_times, match_player_indices)
+        last_tau, last_sigma0, llh = new_theta(last_tau, last_sigma0, match_times, match_player_indices, players_id_to_name_dict)
         all_tau.append(last_tau)
         all_sigma0.append(last_sigma0)
+        print(llh)
         all_llh.append(llh)

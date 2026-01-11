@@ -35,6 +35,6 @@ def plot_fig3_from_npz(npz_path, title, cmap, show_colorbar=True, em_style="o", 
 if __name__ == "__main__":
     plot_fig3_from_npz(
         npz_path="data/fig3_smc_data.npz",
-        title="SMC",
+        title="Log-likelihood of WTA under SMC",
         cmap="viridis",
     )

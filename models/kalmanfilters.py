@@ -50,7 +50,7 @@ class ExtendedKalmanFilters():
 
         self.updated = False
 
-    def filtering(self, modelType = "FullVariance"):
+    def filtering(self, modelType = "FullCovariance"):
 
         if modelType == "FullCovariance":
 
